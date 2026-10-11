@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>n8n Pipeline Architecture: 2000 to 50 Verified Decision Makers</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700;800&display=swap');
+    
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #141721;
+      color: #e2e8f0;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    /* Modern n8n dark canvas */
+    .n8n-canvas {
+      width: 1080px;
+      height: 1080px;
+      position: relative;
+      background-color: #141721;
+      background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1.2px, transparent 1.2px);
+      background-size: 26px 26px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+    }
+
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* n8n Node Card Style */
+    .n8n-node {
+      background: #1e2230;
+      border: 1.5px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0,0,0,0.4);
+      opacity: 0;
+      transform: scale(0.92) translateY(8px);
+      transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      z-index: 10;
+    }
+
+    .n8n-node.visible {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+
+    .n8n-node.executing {
+      border-color: #38bdf8;
+      box-shadow: 0 0 25px rgba(56, 189, 248, 0.35);
+    }
+
+    .n8n-node.success {
+      border-color: rgba(16, 185, 129, 0.6);
+      box-shadow: 0 0 18px rgba(16, 185, 129, 0.2);
+    }
+
+    /* Connecting Wires (SVG) */
+    .wire-path {
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.14);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      transition: stroke 0.4s ease;
+    }
+
+    .wire-draw {
+      stroke-dasharray: 600;
+      stroke-dashoffset: 600;
+      transition: stroke-dashoffset 0.8s cubic-bezier(0.2, 0.8, 0.3, 1), stroke 0.3s ease;
+    }
+
+    .wire-active {
+      stroke: #38bdf8;
+      stroke-dashoffset: 0 !important;
+      filter: drop-shadow(0 0 4px #38bdf8);
+    }
+
+    .wire-success {
+      stroke: #10b981;
+      stroke-dashoffset: 0 !important;
+    }
+
+    /* Explanation Callout Pill */
+    .info-callout {
+      position: absolute;
+      background: rgba(30, 41, 59, 0.95);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6), 0 0 15px rgba(56, 189, 248, 0.15);
+      backdrop-filter: blur(10px);
+      border-radius: 14px;
+      padding: 12px 18px;
+      z-index: 50;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: none;
+    }
+
+    .info-callout.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Pulse dot along wire */
+    @keyframes pulseRing {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="n8n-canvas">
+
+    <!-- TOP BAR (True n8n UI Look) -->
+    <div class="bg-[#191d2b] border-b border-white/10 px-6 py-3 flex items-center justify-between z-20">
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-1.5 text-xs text-slate-400">
+          <span class="text-slate-500 font-semibold">Personal /</span>
+          <span class="text-slate-200 font-bold">AUTOMATED 7-STAGE LEAD FUNNEL</span>
+        </div>
+        <span class="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
+          Active
+        </span>
+      </div>
+
+      <!-- Center tabs -->
+      <div class="flex items-center bg-[#131520] p-1 rounded-lg border border-white/5 text-xs">
+        <span class="px-3 py-1 rounded bg-[#252b3d] text-white font-semibold shadow-sm">Editor</span>
+        <span class="px-3 py-1 text-slate-400 font-medium">Executions</span>
+        <span class="px-3 py-1 text-slate-400 font-medium">Evaluations</span>
+      </div>
+
+      <!-- Right Action button -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#252b3d] text-xs mono text-slate-300 border border-white/5">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="runtimeText">00:01.6s</span>
+        </div>
+        <button class="bg-[#ff6d5a] hover:bg-[#ff5540] text-white font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-md shadow-orange-500/20">
+          <span>⚡</span>
+          <span>Execute workflow</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- MAIN SVG CONNECTING WIRES LAYER -->
+    <svg class="absolute inset-0 w-full h-full pointer-events-none z-0" xmlns="http://www.w3.org/2000/svg">
+      <!-- Wire 0 -> 1: Intake (top-left) to CRM KulOff (top-center) -->
+      <path id="w-0-1" class="wire-path wire-draw" d="M 270 200 C 330 200, 330 200, 390 200" />
+
+      <!-- Wire 1 -> Drop: KulOff dropped active clients branch down -->
+      <path id="w-1-drop" class="wire-path wire-draw" stroke-dasharray="4 4" stroke="#f43f5e" d="M 505 255 L 505 315" />
+
+      <!-- Wire 1 -> 2: CRM KulOff to Regex Filter (top-right) -->
+      <path id="w-1-2" class="wire-path wire-draw" d="M 620 200 C 680 200, 680 200, 740 200" />
+
+      <!-- Wire 2 -> 3: Regex Filter (top-right) down to Business Registry (mid-right) -->
+      <path id="w-2-3" class="wire-path wire-draw" d="M 855 255 C 855 360, 855 360, 855 450" />
+
+      <!-- Wire 3 -> 4: Business Registry (mid-right) to Seniority Check (mid-center) -->
+      <path id="w-3-4" class="wire-path wire-draw" d="M 740 505 C 680 505, 680 505, 620 505" />
+
+      <!-- Wire 4 -> 5: Seniority Check (mid-center) to AI ICP Auditor (mid-left) -->
+      <path id="w-4-5" class="wire-path wire-draw" d="M 390 505 C 330 505, 330 505, 270 505" />
+
+      <!-- Wire 5 -> 6: AI ICP Auditor (mid-left) down to Targeted Scraper (bot-left) -->
+      <path id="w-5-6" class="wire-path wire-draw" d="M 155 560 C 155 660, 155 660, 155 745" />
+
+      <!-- Wire 6 -> 7: Targeted Scraper to Master Output (bot-right) -->
+      <path id="w-6-7" class="wire-path wire-draw" d="M 270 800 C 340 800, 340 800, 410 800" />
+    </svg>
+
+    <!-- FLOATING EXPLANATION CALLOUT PILL -->
+    <div id="callout" class="info-callout max-w-sm">
+      <div class="flex items-center gap-2 mb-1">
+        <span id="calloutStep" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">Step 1</span>
+        <span id="calloutTitle" class="text-xs font-black text-white">CRM Suppression</span>
+      </div>
+      <p id="calloutDesc" class="text-xs text-slate-300 leading-relaxed font-medium">
+        Checks 150k+ CRM records in 1 sec. Strips 1,100 active clients so sales never cold-calls paying accounts.
+      </p>
+    </div>
+
+    <!-- WORKFLOW NODES CONTAINER (3 ROWS FLOW) -->
+    <div class="relative z-10 px-12 my-auto space-y-16">
+
+      <!-- ROW 1 (Nodes 0, 1, 2) -->
+      <div class="grid grid-cols-12 gap-8 items-start">
+        
+        <!-- NODE 0: LinkedIn Raw Inflow -->
+        <div id="node-0" class="col-span-3 n8n-node p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-black text-xs">
+              ⚡
+            </div>
+            <span class="mono text-xs font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">2,000 items</span>
+          </div>
+          <div class="text-xs font-bold text-white">LinkedIn Lead Inflow</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Raw keywords scrape</div>
+          <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
+            <span class="text-slate-400">Trigger</span>
+            <span class="text-emerald-400 font-semibold flex items-center gap-1">✓ Dispatched</span>
+          </div>
+        </div>
+
+        <div class="col-span-1"></div>
+
+        <!-- NODE 1: CRM Suppression (KulOff) -->
+        <div id="node-1" class="col-span-4 n8n-node p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 font-black text-xs">
+              1
+            </div>
+            <span id="badge-1" class="mono text-xs font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">Waiting</span>
+          </div>
+          <div class="text-xs font-bold text-white">CRM Suppression (KulOff)</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">150k+ records cross-check</div>
+          <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
+            <span class="text-rose-400 font-medium">-1,100 Clients</span>
+            <span class="text-slate-200 font-bold mono">900 pass</span>
+          </div>
+        </div>
+
+        <div class="col-span-1"></div>
+
+        <!-- NODE 2: Negative Regex Filter -->
+        <div id="node-2" class="col-span-3 n8n-node p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 rounded-lg bg-violet-500/20 border border-violet-500/40 flex items-center justify-center text-violet-400 font-black text-xs">
+              2
+            </div>
+            <span id="badge-2" class="mono text-xs font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">Waiting</span>
+          </div>
+          <div class="text-xs font-bold text-white">Title & Trades Regex</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Purges site staff & interns</div>
+          <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
+            <span class="text-rose-400 font-medium">-550 Trades</span>
+            <span class="text-slate-200 font-bold mono">350 pass</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ROW 2 (Nodes 5, 4, 3: Flow goes right to left) -->
+      <div class="grid grid-cols-12 gap-8 items-start">
+        
+        <!-- NODE 5: AI ICP Auditor -->
+        <div id="node-5" class="col-span-3 n8n-node p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 rounded-lg bg-pink-500/20 border border-pink-500/40 flex items-center justify-center text-pink-400 font-black text-xs">
+              5
+            </div>
+            <span id="badge-5" class="mono text-xs font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">Waiting</span>
+          </div>
+          <div class="text-xs font-bold text-white">AI Decision-Maker ICP</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Audits true budget authority</div>
+          <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
+            <span class="text-rose-400 font-medium">-12 No Budget</span>
+            <span class="text-slate-200 font-bold mono">58 pass</span>
+          </div>
+        </div>
+
+        <div class="col-span-1"></div>
+
+        <!-- NODE 4: Seniority & Age 66+ Check -->
+        <div id="node-4" class="col-span-4 n8n-node p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-black text-xs">
+              4
+            </div>
+            <span id="badge-4" class="mono text-xs font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">Waiting</span>
+          </div>
+          <div class="text-xs font-bold text-white">Seniority & Age Check</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Public records age veto</div>
+          <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
+            <span class="text-rose-400 font-medium">-50 Pensioners</span>
+            <span class="text-slate-200 font-bold mono">70 pass</span>
+          </div>
+        </div>
+
+        <div class="col-span-1"></div>
+
+        <!-- NODE 3: Official Business Registry -->
+        <div id="node-3" class="col-span-3 n8n-node p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 rounded-lg bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-400 font-black text-xs">
+              3
+            </div>
+            <span id="badge-3" class="mono text-xs font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">Waiting</span>
+          </div>
+          <div class="text-xs font-bold text-white">Business Registry (SNI)</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Verified codes & turnover</div>
+          <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
+            <span class="text-rose-400 font-medium">-230 Non-Dev</span>
+            <span class="text-slate-200 font-bold mono">120 pass</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ROW 3 (Node 6 and Final Output Node 7) -->
+      <div class="grid grid-cols-12 gap-8 items-center">
+        
+        <!-- NODE 6: Targeted Scraper API -->
+        <div id="node-6" class="col-span-3 n8n-node p-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-black text-xs">
+              6
+            </div>
+            <span id="badge-6" class="mono text-xs font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">Waiting</span>
+          </div>
+          <div class="text-xs font-bold text-white">Targeted Scraper API</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">PhantomBuster / Vayne API</div>
+          <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
+            <span class="text-emerald-400 font-bold">95% Saved</span>
+            <span class="text-slate-200 font-bold mono">53 leads</span>
+          </div>
+        </div>
+
+        <div class="col-span-1"></div>
+
+        <!-- NODE 7: Final Master Output Card -->
+        <div id="node-7" class="col-span-8 n8n-node p-5 border-emerald-500/40 bg-[#162326]/80">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <span class="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-black text-base shadow-lg shadow-emerald-500/20">
+                ✓
+              </span>
+              <div>
+                <div class="text-sm font-black text-white">Final Sales-Ready Master Delivery</div>
+                <div class="text-[11px] text-slate-400">100% verified C-Suite leaders & City Planners, 0 active client conflicts</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-2xl font-black text-emerald-400 mono">53 LPRs</span>
+              <div class="text-[10px] text-emerald-300/80 font-semibold uppercase tracking-wider">Ready for Outbound</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2.5 pt-2 border-t border-white/10 text-[11px]">
+            <div class="bg-black/30 p-2 rounded-lg border border-white/5 flex items-center justify-between">
+              <div>
+                <div class="font-bold text-white">Castellum AB</div>
+                <div class="text-[10px] text-slate-400">Head of Property Dev</div>
+              </div>
+              <span class="text-emerald-400 font-bold">✓</span>
+            </div>
+            <div class="bg-black/30 p-2 rounded-lg border border-white/5 flex items-center justify-between">
+              <div>
+                <div class="font-bold text-white">Malmö Stad</div>
+                <div class="text-[10px] text-slate-400">City Planning Director</div>
+              </div>
+              <span class="text-emerald-400 font-bold">✓</span>
+            </div>
+            <div class="bg-black/30 p-2 rounded-lg border border-white/5 flex items-center justify-between">
+              <div>
+                <div class="font-bold text-white">Wihlborgs Fastigheter</div>
+                <div class="text-[10px] text-slate-400">Regional Director</div>
+              </div>
+              <span class="text-emerald-400 font-bold">✓</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- BOTTOM BAR WITH DYNAMIC SUBTITLE -->
+    <div class="bg-[#12141d] border-t border-white/10 px-8 py-3.5 flex items-center justify-between z-20">
+      <div class="flex items-center gap-3">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span id="bottomSubtitle" class="text-xs font-semibold text-slate-300">
+          Stage 0: 2,000 raw scraped leads enter the pipeline...
+        </span>
+      </div>
+      <div class="text-xs text-slate-400 mono font-medium">
+        Built with Python & LLMs
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Step-by-Step Storytelling Progression Sequence
+    const storySteps = [
+      {
+        nodeId: 'node-0',
+        wireId: null,
+        calloutPos: { top: '100px', left: '60px' },
+        stepNum: 'Input',
+        title: 'LinkedIn Lead Inflow',
+        desc: 'What we have: 2,000 raw scraped profiles. Problem: 90% non-buyers and trade workers.',
+        subtitle: 'Step 0: Intake of 2,000 raw scraped leads from LinkedIn'
+      },
+      {
+        nodeId: 'node-1',
+        wireId: 'w-0-1',
+        dropWireId: 'w-1-drop',
+        calloutPos: { top: '100px', left: '380px' },
+        stepNum: 'Filter 1',
+        title: 'CRM Suppression (KulOff)',
+        desc: 'Checks 150k+ CRM records in 1 sec. Strips 1,100 active clients so sales never cold-calls existing accounts.',
+        subtitle: 'Step 1: In-memory CRM suppression blocks 1,100 active clients in 1 second'
+      },
+      {
+        nodeId: 'node-2',
+        wireId: 'w-1-2',
+        calloutPos: { top: '100px', left: '680px' },
+        stepNum: 'Filter 2',
+        title: 'Negative Regex Filter',
+        desc: 'Purges site foremen, electricians, plumbers, and junior roles in 50 ms. 350 qualified titles pass forward.',
+        subtitle: 'Step 2: Sub-second regex filter strips 550 trade workers & assistants'
+      },
+      {
+        nodeId: 'node-3',
+        wireId: 'w-2-3',
+        calloutPos: { top: '400px', left: '680px' },
+        stepNum: 'Filter 3',
+        title: 'Business Registry (SNI)',
+        desc: 'Queries official corporate registry for industry codes (68.100, 41.100) & verified turnover. 120 companies pass.',
+        subtitle: 'Step 3: Official business registry verifies real developers & financial health'
+      },
+      {
+        nodeId: 'node-4',
+        wireId: 'w-3-4',
+        calloutPos: { top: '400px', left: '380px' },
+        stepNum: 'Filter 4',
+        title: 'Seniority & Age Check',
+        desc: 'Cross-checks public population records to detect 66+ retired profiles before paying for scraper credits.',
+        subtitle: 'Step 4: Public records check filters out 50 retired executives (66+)'
+      },
+      {
+        nodeId: 'node-5',
+        wireId: 'w-4-5',
+        calloutPos: { top: '400px', left: '60px' },
+        stepNum: 'Filter 5',
+        title: 'AI Decision-Maker Auditor',
+        desc: 'AI evaluates business model and true purchasing power: "Decides WHAT to build? YES. Controls Budget? YES."',
+        subtitle: 'Step 5: AI Semantic Auditor verifies actual C-suite strategic budget authority'
+      },
+      {
+        nodeId: 'node-6',
+        wireId: 'w-5-6',
+        calloutPos: { top: '700px', left: '60px' },
+        stepNum: 'Filter 6',
+        title: 'Targeted Scraper API',
+        desc: 'Triggers paid APIs (PhantomBuster/Vayne) ONLY on the final 53 decision-makers. Slashes API costs by 95%!',
+        subtitle: 'Step 6: Paid scraper runs ONLY on 53 vetted leads, saving 95% API spend'
+      },
+      {
+        nodeId: 'node-7',
+        wireId: 'w-6-7',
+        calloutPos: { top: '700px', left: '410px' },
+        stepNum: 'Output',
+        title: 'Final Sales-Ready Delivery',
+        desc: 'Delivers 53 verified C-Suite leaders & City Planners straight into CRM with zero manual cleaning needed.',
+        subtitle: 'Result: From 2,000 raw leads to 53 verified decision-makers in under 2 minutes!'
+      }
+    ];
+
+    let currentStoryStep = 0;
+
+    function resetWorkflow() {
+      // Hide all nodes and wires
+      for (let i = 0; i <= 7; i++) {
+        const node = document.getElementById(`node-${i}`);
+        if (node) {
+          node.className = 'n8n-node' + (i === 7 ? ' col-span-8 p-5 border-emerald-500/40 bg-[#162326]/80' : (i === 1 || i === 4 ? ' col-span-4 p-4' : ' col-span-3 p-4'));
+        }
+        const badge = document.getElementById(`badge-${i}`);
+        if (badge) {
+          badge.innerText = 'Waiting';
+          badge.className = 'mono text-xs font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-full border border-white/5';
+        }
+      }
+
+      const allWires = document.querySelectorAll('.wire-path');
+      allWires.forEach(w => {
+        w.classList.remove('wire-active', 'wire-success');
+      });
+
+      document.getElementById('callout').classList.remove('show');
+      currentStoryStep = 0;
+    }
+
+    function advanceStory() {
+      if (currentStoryStep >= storySteps.length) {
+        // Hold triumph state for 3 seconds, then loop!
+        setTimeout(resetWorkflow, 3000);
+        return;
+      }
+
+      const s = storySteps[currentStoryStep];
+
+      // 1. Animate incoming wire if exists
+      if (s.wireId) {
+        const wire = document.getElementById(s.wireId);
+        if (wire) {
+          wire.classList.add('wire-active');
+        }
+      }
+
+      if (s.dropWireId) {
+        const dropWire = document.getElementById(s.dropWireId);
+        if (dropWire) dropWire.classList.add('wire-active');
+      }
+
+      // 2. Reveal current node with animation
+      const node = document.getElementById(s.nodeId);
+      if (node) {
+        node.classList.add('visible', 'executing');
+        setTimeout(() => {
+          node.classList.remove('executing');
+          node.classList.add('success');
+        }, 500);
+      }
+
+      // 3. Mark previous node & wire as success
+      if (currentStoryStep > 0) {
+        const prevStep = storySteps[currentStoryStep - 1];
+        if (prevStep.wireId) {
+          const prevWire = document.getElementById(prevStep.wireId);
+          if (prevWire) {
+            prevWire.classList.remove('wire-active');
+            prevWire.classList.add('wire-success');
+          }
+        }
+      }
+
+      // Update node badge
+      const nodeIdx = parseInt(s.nodeId.replace('node-', ''));
+      const badge = document.getElementById(`badge-${nodeIdx}`);
+      if (badge) {
+        badge.innerText = '✓ Passed';
+        badge.className = 'mono text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/30';
+      }
+
+      // 4. Update Callout popover position & content
+      const callout = document.getElementById('callout');
+      callout.style.top = s.calloutPos.top;
+      callout.style.left = s.calloutPos.left;
+      document.getElementById('calloutStep').innerText = s.stepNum;
+      document.getElementById('calloutTitle').innerText = s.title;
+      document.getElementById('calloutDesc').innerText = s.desc;
+      callout.classList.add('show');
+
+      // 5. Update bottom subtitle
+      document.getElementById('bottomSubtitle').innerText = s.subtitle;
+
+      currentStoryStep++;
+    }
+
+    // Start storytelling sequence
+    resetWorkflow();
+    advanceStory();
+    setInterval(advanceStory, 2000);
+
+    // Live clock timer
+    let start = Date.now();
+    setInterval(() => {
+      let diff = (Date.now() - start) % 18000;
+      let s = Math.floor(diff / 1000);
+      let ms = Math.floor((diff % 1000) / 100);
+      document.getElementById('runtimeText').innerText = `00:0${s}.${ms}s`;
+    }, 100);
+  </script>
+</body>
+</html>
